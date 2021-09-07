@@ -1,5 +1,6 @@
 // Flutter side of Hub structures
 import 'dart:convert';
+import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart'; // package for MQTT connection
 //import 'dart:developer' as developer;
@@ -16,15 +17,9 @@ class Thing {
   String token;
   //Map<String, dynamic> keys;
 
-  Thing(
-    this.id,
-    this.name,
-    this.description,
-    this.type,
-    this.properties,
-    this.readAt,
-    /*this.keys*/
-  );
+  Thing(this.id, this.name, this.description, this.type, this.properties,
+      this.readAt,
+      [this.token]);
 
   // named constructor from json object
   // also using an initializer list
@@ -58,16 +53,23 @@ class Thing {
   // Given an EXISTING thing, and an access token,
   // creates a property in it of type prop_type,
   // and returns created property
-  Future<Property> create_property(
-      String prop_type, String access_token) async {
+  Future<Property> create_property(String prop_type,
+      [String access_token]) async {
     if (id == null) throw Exception('Invalid thing id');
+
+    // if we're not passed a new access token,
+    if (access_token == null) {
+      //make sure we got one when constructed
+      if (token == null) throw Exception('No access token');
+      //use the one we have
+      access_token = token;
+    }
     // basic address
     var addr_url = Uri.parse('$basicURL/things/$id/properties');
 
     var blank = Property(
         null, prop_type.toLowerCase(), 'A simple $prop_type', prop_type);
-    //blank property,except type and name
-    // if it is location data
+    //blank property
 
     var http_response = await http.post(addr_url,
         headers: {
@@ -92,72 +94,43 @@ class Thing {
   // updates property values given property, values and access token
   Future<void> update_property_http(
       Property property, List<dynamic> values, String access_token) async {
-    var addr_url = Uri.parse(
-        'https://dwd.tudelft.nl:443/bucket/api/things/$id/properties/${property.id}');
+    var addr_url = Uri.parse('$basicURL/things/$id/properties/${property.id}');
 
     property.values =
         values; // setting the values of the property that's replaced
 
-    if (property.type == 'PICTURE') {
-      // we must redefine
-      property.values = [];
-    }
+    var http_response = await http.put(
+      addr_url,
+      headers: {
+        'Authorization': 'bearer $access_token',
+        'Content-Type': 'application/json',
+        'Response-Type': 'application/json'
+      },
+      body: jsonEncode(property.to_json()),
+    );
 
-    //var lala = (jsonEncode(property.to_json()));
-    // printing post message
-    //debugPrint(jsonEncode(property.to_json());
-    if (property.type != 'PICTURE') {
-      var http_response = await http.put(
-        addr_url,
-        headers: {
-          'Authorization': 'bearer $access_token',
-          'Content-Type': 'application/json',
-          'Response-Type': 'application/json'
-        },
-        body: jsonEncode(property.to_json()),
-      );
+    if (http_response.statusCode != 200) {
+      //TODO: replce with snackbar
+      //TODO: do something with the error (retry, stop trying?)
+      //error 503-> body:"upstream connect error or disconnect/reset before headers. reset reason: connection termination"
+      //error 500
 
-      if (http_response.statusCode != 200) {
-        //TODO: replce with snackbar
-        //TODO: do something with the error (retry, stop trying?)
-        //error 503-> body:"upstream connect error or disconnect/reset before headers. reset reason: connection termination"
-        //error 500
-
-        // If that response was not OK, throw an error.
-        // throw Exception('''Failed to post property values
-        //                     ${property.values}
-        //                     to property with id ${property.id},
-        //                     from thing with id: $id
-        //                     to the following link:
-        //                     $addr_url''');
-        return (true);
-      }
-    } else {
-      // TODO: here we handle the specific media content ( picture/video )
-      // wait until http is redefined
+      // If that response was not OK, throw an error.
+      // throw Exception('''Failed to post property values
+      //                     ${property.values}
+      //                     to property with id ${property.id},
+      //                     from thing with id: $id
+      //                     to the following link:
+      //                     $addr_url''');
+      return (true);
     }
     return (true);
-    //var json =  await jsonDecode(http_response.body);
-    //return(Property.from_json(json));
   }
 
   // TODO: - debug and fix authorization of MQTT on the bucket side
-
   void update_property_mqtt(Property property, List<dynamic> values,
       String thing_token, MqttClient mqtt_client) {
     var topic_url = '/things/$id/properties/${property.id}';
-
-    // struct of data to send to server value :[[ tmstamp, ... ]]
-    var temp = <Object>[];
-    // if four dimensions, timestamp is given by last value
-    temp.add((property.type == 'FOUR_DIMENSIONS')
-        ? (values[4].millisecondsSinceEpoch)
-        : DateTime.now().millisecondsSinceEpoch);
-    temp +=
-        (property.type != 'FOUR_DIMENSIONS') ? values : values.sublist(0, 4);
-    property.values =
-        temp; // setting the values of the property that's replaced
-
     final builder = MqttClientPayloadBuilder();
     builder.addString(jsonEncode(property.to_json()));
 
@@ -175,15 +148,8 @@ class Thing {
     //if (properties.isEmpty) {
     await create_property('GYROSCOPE', access_token);
     await create_property('ACCELEROMETER', access_token);
-    //}
-    // 5D location property vector
-    //await create_property('FOUR_DIMENSIONS', access_token);
-    // 5D vector -> location (2D) and altitude (1D)
     await create_property('LOCATION', access_token);
     await create_property('ALTITUDE', access_token);
-
-    // Picture/ video property
-    await create_property('PICTURE', access_token);
   }
 }
 
@@ -242,6 +208,9 @@ class DCD_client {
 
   // default constructor
   DCD_client();
+
+  // app authentication object
+  FlutterAppAuth appAuth = FlutterAppAuth();
 
   Future<Thing> FindOrCreateThing(
       String thing_name, String access_token) async {
@@ -310,5 +279,28 @@ class DCD_client {
           Uri.parse('https://dwd.tudelft.nl/api/things/$prop_id_to_delete'),
           headers: {'Authorization': 'bearer $access_token'});
     });
+  }
+
+  Future<bool> Authorize() async {
+    var result = await appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(id, redirect_url.toString(),
+            discoveryUrl:
+                'https://dwd.tudelft.nl/.well-known/openid-configuration',
+            scopes: [
+          'openid',
+          'offline',
+          'email',
+          'profile',
+          'dcd:public',
+          'dcd:things'
+        ]));
+    if (result != null) {
+      // save the code verifier as it must be used when exchanging the token
+      access_token = result.accessToken;
+      authorized = true;
+      return true;
+    }
+    // result is null, so something when wrong
+    return false;
   }
 }

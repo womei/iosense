@@ -413,35 +413,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Future stream_to_hub() async {
     if (!client.authorized) {
       try {
-        var result = await appAuth.authorizeAndExchangeCode(
-            AuthorizationTokenRequest(client.id, client.redirect_url.toString(),
-                discoveryUrl:
-                    'https://dwd.tudelft.nl/.well-known/openid-configuration',
-                scopes: [
-              'openid',
-              'offline',
-              'email',
-              'profile',
-              'dcd:public',
-              'dcd:things'
-            ]));
-
-        if (result != null) {
-          client.authorized = true;
-          // save the code verifier as it must be used when exchanging the token
-          client.access_token = result.accessToken;
-
-          //await create_properties_hub();
-          // await save_thing_to_disk();
-
-          // set up MQTT
-          // set_up_mqtt();
-
-          // start connection on MQTT port
-          //connect_mqtt(client.thing.id, client.access_token);
-        } else {
-          debugPrint('authoirzation went wrong!');
-        }
+        await client.Authorize();
       } on Exception catch (e, s) {
         debugPrint('login error: $e - stack: $s');
       }
